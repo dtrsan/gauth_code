@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+
+import sys, getopt
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+import math
+import os
+import struct
+import time
+
+DEFAULT_CONFIG_FILE_PATH = "~/.gauthrc"
+
+class GAuthCodeError:
+    AccountMissingError = 1
+    InvalidParameterError = 2
+    ParametersConflictError = 3
+    InvalidSecretError = 4
+
+
+class GoogleAuthenticator:
+    account = None
+    secret = None
+
+    def __init__(self, account, secret):
+        self.account = account
+        self.secret = secret
+
+
+    # http://en.wikipedia.org/wiki/Google_Authenticator
+    # function GoogleAuthenticatorCode(string secret)
+    #   key := base32decode(secret)
+    #   message := floor(current Unix time / 30)
+    #   hash := HMAC-SHA1(key, message)
+    #   offset := value of last nibble of hash
+    #   truncatedHash := hash[offset..offset+3]  //4 bytes starting at the offset
+    #   Set the first bit of truncatedHash to zero  //remove the most significant bit
+    #   code := truncatedHash mod 1000000
+    #   pad code with 0 until length of code is 6
+    #   return code
+    def googleAuthenticatorCode(self, secret, challenge):
+        try:
+            key = base64.b32decode(secret, True)
+            message = challenge.to_bytes(8, 'big')
+            hash = hmac.new(key, message, hashlib.sha1)
+            offset = int(struct.unpack("B", hash.digest()[-1:])[0]) & 0xF
+            truncatedHash = int(struct.unpack(">I", hash.digest()[offset:offset+4])[0])
+            truncatedHash &= 0x7fffffff
+            code = truncatedHash % 1000000
+            formattedCode = "{code:06d}".format(code=code)
+
+            return formattedCode
+        except (binascii.Error, TypeError) as err:
+            return None
+
+    def code(self):
+        challenge = math.floor(time.time() / 30)
+        return self.googleAuthenticatorCode(self.secret, challenge)
+
+
+    def nextCode(self):
+        challenge = math.floor(time.time() / 30) + 1
+        return self.googleAuthenticatorCode(self.secret, challenge)
+
+
+    def printCodes(self):
+        code = self.code()
+        if code == None:
+            print("Account '%s' does not exist." % self.account)
+            return
+
+        nextCode = self.nextCode()
+
+        account_label = "Account: %s" % self.account
+        print(account_label)
+        print(len(account_label)*"-")
+
+        time_elapsed = int((time.time() % 30) / 3)
+
+        print("%s%s %s" % (time_elapsed*"*", (10-time_elapsed)*".", code))
+        print("%s %s" % (10*".", nextCode))
+
+        print(len(account_label)*"-")
+        print("")
+
+
+class ConfigurationError:
+    CannotParseConfigFileError = 11
+    WorldReadableConfigFileError = 12
+
+
+class Configuration:
+    accounts = {}
+    configFilePath = None
+
+    def __init__(self, config_file_path = DEFAULT_CONFIG_FILE_PATH):
+        self.configFilePath = os.path.expanduser(config_file_path)
+        self.loadAccounts()
+
+
+    def secret(self, account):
+        if account in self.accounts.keys():
+            return self.accounts[account]
+        else:
+            return None
+
+
+    def addAccount(self, account, secret):
+        self.accounts[account] = secret
+        self.saveAccounts()
+
+
+    def removeAccount(self, account):
+        secret = self.accounts.pop(account, None)
+        if secret:
+            self.saveAccounts()
+            return True
+        else:
+            return False
+
+
+    def checkConfigFilePermissions(self):
+        perm = None
+        try:
+            st = os.stat(self.configFilePath)
+            perm =  str(oct(st.st_mode)[-4:])
+        except FileNotFoundError as err:
+            return
+
+        if perm == "0600" or perm == "0400":
+            return
+
+        print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+              "@            WARNING: UNPROTECTED CONFIG FILE!            @\n"
+              "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+              "Permissions %s for '%s' are too open.\n"
+              "It is required that your config file is NOT accessible by others.\n"
+              "This config file will be ignored.\n"
+              "Aborting...\n" %
+              (perm, self.configFilePath), file=sys.stderr)
+        sys.exit(ConfigurationError.WorldReadableConfigFileError)
+
+
+    def saveAccounts(self):
+        try:
+            config_file_fd = os.open(self.configFilePath,
+                                     os.O_WRONLY|os.O_CREAT,
+                                     int("0600", 8))
+
+            config_file = os.fdopen(config_file_fd, "w")
+            json.dump(self.accounts, config_file, ensure_ascii=False)
+
+        except PermissionError as err:
+            print("Cannot write configuration.", file=sys.stderr)
+            print("Check permissions for file '%s'\n" % self.configFilePath,
+                   file=sys.stderr)
+
+
+    def loadAccounts(self):
+        self.checkConfigFilePermissions()
+
+        try:
+            with open(self.configFilePath, 'r') as config_file:
+                content = config_file.read()
+                self.accounts = json.loads(content)
+        except FileNotFoundError as err:
+            # configuration file does not exist, reset accounts
+            self.accounts = {}
+        except ValueError as err:
+            print("Cannot parse configuration.", file=sys.stderr)
+            print("Fix or delete file '%s'" % self.configFilePath,
+                   file=sys.stderr)
+            print("Aborting...\n", file=sys.stderr)
+            sys.exit(ConfigurationError.CannotParseConfigFileError)
+            self.accounts = {}
+
+
+def usage():
+    print("Usage: %s [-h] [-l] [-r | -s <secret>] <account>\n" %
+           os.path.basename(sys.argv[0]))
+    print("Description:")
+    print("  -l    List the accounts.")
+    print("  -r    Remove an account.")
+    print("  -s <secret>\n"
+          "        Add a new account or update secret for an existing account.\n"
+          "        Secret is a base32 encoded string.")
+    print("  -h    Help.\n")
+
+
+def printAccounts(accounts):
+    if len(accounts) == 0:
+        print("No accounts configured.\n")
+        return
+
+    print("Available accounts: ")
+    for account in sorted(accounts):
+        print("  %s" % account)
+
+    print("")
+
+def main(argv):
+    try:
+        opts, args = getopt.getopt(argv, "hlrs:")
+    except getopt.GetoptError as err:
+        print(str(err)+"\n")
+        usage()
+        sys.exit(GAuthCodeError.InvalidParameterError)
+
+    account = None
+    secretFlag = False
+    secret = None
+    removeFlag = False
+    listAccountsFlag = False
+
+    for opt, arg in opts:
+        if opt == '-h':
+            usage()
+            sys.exit()
+
+        elif opt == '-l':
+            listAccountsFlag = True
+
+        elif opt == '-s':
+            secretFlag = True
+            secret = arg
+
+        elif opt ==  '-r':
+            removeFlag = True
+
+    if listAccountsFlag:
+        configuration = Configuration()
+        printAccounts(configuration.accounts.keys())
+        return
+
+    if len(args) == 0:
+        print("The account is missing.\n")
+        usage()
+        sys.exit(GAuthCodeError.AccountMissingError)
+    else:
+        account = args[0]
+
+    if secretFlag and removeFlag:
+        print ("Parameters -r and -s are mutually exclusive.\n")
+        usage()
+        sys.exit(GAuthCodeError.ParametersConflictError)
+
+    if secretFlag:
+        try:
+            base64.b32decode(secret, True)
+        except binascii.Error as err:
+            print("Invalid secret.\n", file=sys.stderr)
+            usage()
+            sys.exit(GAuthCodeError.InvalidSecretError)
+
+        configuration = Configuration()
+        if account in configuration.accounts.keys():
+            print("Updating account '%s' with the new secret.\n" % account)
+        else:
+            print("Adding account '%s' with the new secret.\n" % account)
+
+        configuration.addAccount(account, secret)
+        gauth = GoogleAuthenticator(account, secret)
+        gauth.printCodes()
+
+    if removeFlag:
+        print("Trying to remove account '%s'." % account)
+        configuration = Configuration()
+        is_removed = configuration.removeAccount(account)
+        if is_removed:
+            print("Account '%s' is removed.\n" % account)
+        else:
+            print("Account '%s' does not exist.\n" % account)
+
+
+    if not secretFlag and not removeFlag:
+        configuration = Configuration()
+        gauth = GoogleAuthenticator(account, configuration.secret(account))
+        gauth.printCodes()
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+
