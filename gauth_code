@@ -146,7 +146,7 @@ class Configuration:
     def saveAccounts(self):
         try:
             config_file_fd = os.open(self.configFilePath,
-                                     os.O_WRONLY|os.O_CREAT,
+                                     os.O_WRONLY|os.O_CREAT|os.O_TRUNC,
                                      int("0600", 8))
 
             config_file = os.fdopen(config_file_fd, "w")
