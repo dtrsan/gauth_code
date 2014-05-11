@@ -87,3 +87,11 @@ Description:
 **gauth_code** requires Python 3. It uses only Python Standard Library. No
 additional installation of third party modules is required.
 
+# FAQ
+1. Is it possible to use this script to generate a code for Dropbox two-step
+   verification? Script always throws "Invalid secret." message.
+
+**Answer:** Yes, it is but you need to pad the secret key properly. Just add
+six '=' characters ("======") at the end of the secret key and everything will
+work fine.
+
