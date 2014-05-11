@@ -88,9 +88,9 @@ Description:
 additional installation of third party modules is required.
 
 # FAQ
-1. Is it possible to use this **gauth_code** to generate a code for Dropbox
-   two-step verification? **gauth_code** always throws "Invalid secret."
-   message.
+1. Is it possible to use **gauth_code** to generate a code for Dropbox two-step
+   verification? **gauth_code** always throws "Invalid secret." message during
+   account configuration.
 
 **Answer:** Yes, it is but you need to pad the secret key properly. Just add
 six '=' characters ("======") at the end of the secret key and everything will
