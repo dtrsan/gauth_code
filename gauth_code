@@ -85,6 +85,15 @@ class GoogleAuthenticator:
         print(len(account_label)*"-")
         print("")
 
+    def printCode(self):
+        code = self.code()
+        if code == None:
+            print("Account '%s' does not exist." % self.account)
+            return
+
+        time_elapsed = int((time.time() % 30) / 3)
+        print("%s%s %s  %s " % (time_elapsed*"*", (10-time_elapsed)*".", code, self.account))
+
 
 class ConfigurationError:
     CannotParseConfigFileError = 11
@@ -178,9 +187,10 @@ class Configuration:
 
 
 def usage():
-    print("Usage: %s [-h] [-l] [-r | -s <secret>] <account>\n" %
+    print("Usage: %s [-h] [-a] [-l] [-r | -s <secret>] <account>\n" %
            os.path.basename(sys.argv[0]))
     print("Description:")
+    print("  -a    Show tokens for all accounts.")
     print("  -l    List the accounts.")
     print("  -r    Remove an account.")
     print("  -s <secret>\n"
@@ -202,7 +212,7 @@ def printAccounts(accounts):
 
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv, "hlrs:")
+        opts, args = getopt.getopt(argv, "halrs:")
     except getopt.GetoptError as err:
         print(str(err)+"\n")
         usage()
@@ -213,11 +223,15 @@ def main(argv):
     secret = None
     removeFlag = False
     listAccountsFlag = False
+    showAllFlag = False
 
     for opt, arg in opts:
         if opt == '-h':
             usage()
             sys.exit()
+
+        elif opt == '-a':
+            showAllFlag = True
 
         elif opt == '-l':
             listAccountsFlag = True
@@ -232,6 +246,13 @@ def main(argv):
     if listAccountsFlag:
         configuration = Configuration()
         printAccounts(configuration.accounts.keys())
+        return
+
+    if showAllFlag:
+        configuration = Configuration()
+        for account in configuration.accounts:
+            gauth = GoogleAuthenticator(account, configuration.secret(account))
+            gauth.printCode()
         return
 
     if len(args) == 0:
@@ -272,7 +293,6 @@ def main(argv):
             print("Account '%s' is removed.\n" % account)
         else:
             print("Account '%s' does not exist.\n" % account)
-
 
     if not secretFlag and not removeFlag:
         configuration = Configuration()
