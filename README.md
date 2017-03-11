@@ -64,6 +64,17 @@ Available accounts:
 
 ```
 
+## Show tokens for all accounts
+To show tokens for all configured accounts run **gauth_code** with -a parameter.
+
+**Example:**
+```
+$ gauth_code -a
+
+***....... 291337  account1@example.com
+***....... 133775  account2@example.com
+```
+
 # Help
 To see help run **gauth_code** with -h parameter.
 
@@ -74,6 +85,7 @@ $ gauth_code -h
 Usage: gauth_code [-h] [-l] [-r | -s <secret>] <account>
 
 Description:
+  -a    Show tokens for all accounts.
   -l    List the accounts.
   -r    Remove an account.
   -s <secret>
